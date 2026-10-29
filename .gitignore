@@ -9,3 +9,7 @@ eval/reports/
 .playwright-mcp/
 public/hanzi/
 src-tauri/llama/
+dist-site/
+site/public/hanzi/
+site/public/img/
+site/public/favicon.png

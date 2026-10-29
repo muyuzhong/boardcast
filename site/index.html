@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="paper">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>boardcast — 说话，板书自己长出来</title>
+    <meta name="description" content="会议里大家只管讨论，白板上的手绘示意图跟着对话实时生长。本地运行，不上传音频，不调用云端模型。 / Talk, and the whiteboard draws itself. Local-first live meeting diagrams." />
+    <meta property="og:title" content="boardcast — Talk, and the whiteboard draws itself" />
+    <meta property="og:description" content="Local-first live meeting diagrams. Speech → small local LLM → deterministic layout → hand-drawn board." />
+    <meta property="og:image" content="./img/screenshot-ink.png" />
+    <meta name="theme-color" content="#efeae0" />
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <script>
+      // 先于样式确定主题和语言，避免闪一下
+      try {
+        var t = localStorage.getItem('bc-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'chalk' : 'paper')
+        document.documentElement.dataset.theme = t
+        var q = new URLSearchParams(location.search).get('lang')
+        var l = q || localStorage.getItem('bc-lang') || (/^zh/i.test(navigator.language) ? 'zh' : 'en')
+        document.documentElement.lang = l === 'en' ? 'en' : 'zh-CN'
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <!-- 黑板的粉笔颗粒：施在整层墨迹上 -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="chalk" x="-2%" y="-2%" width="104%" height="104%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="4" result="n" />
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2" result="d" />
+        <feComponentTransfer in="n" result="m">
+          <feFuncA type="discrete" tableValues="0 1 1 1 1 1" />
+        </feComponentTransfer>
+        <feComposite in="d" in2="m" operator="in" />
+      </filter>
+    </svg>
+
+    <header class="nav" id="nav">
+      <a class="brand" href="#top" aria-label="boardcast"><span class="ink-write" data-ink-raw="boardcast" data-size="100" data-messy="0.1" data-play="load"></span></a>
+      <nav class="links" aria-label="main">
+        <a href="#how" data-i18n="nav.how"></a>
+        <a href="#hand" data-i18n="nav.hand"></a>
+        <a href="#privacy" data-i18n="nav.privacy"></a>
+        <a href="#features" data-i18n="nav.features"></a>
+        <a href="#roadmap" data-i18n="nav.roadmap"></a>
+      </nav>
+      <div class="tools">
+        <button class="tool" id="lang" type="button" aria-label="Language"><span data-i18n="lang.other"></span></button>
+        <button class="tool" id="theme" type="button" data-i18n-aria="theme.toggle">
+          <svg class="i-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg>
+        </button>
+        <a class="btn btn-sm" href="https://github.com/HsiangNianian/boardcast/releases" data-i18n="nav.download"></a>
+      </div>
+    </header>
+
+    <main>
+      <!-- ① 首屏：整页就是一块白板 -->
+      <section class="hero" id="top">
+        <p class="eyebrow mono" data-i18n="hero.eyebrow"></p>
+        <h1 class="ink-write hero-title" data-ink="hero.title" data-messy="0.16" data-weight="0.62" data-align="center" data-play="load" data-underline="last"></h1>
+        <p class="lede" data-i18n="hero.lede"></p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/HsiangNianian/boardcast/releases" data-i18n="cta.download"></a>
+          <a class="btn btn-ghost" href="https://github.com/HsiangNianian/boardcast" data-i18n="cta.github"></a>
+        </div>
+        <p class="note mono" data-i18n="hero.note"></p>
+
+        <div class="window" id="demo">
+          <div class="win-bar">
+            <span class="rec" id="rec" aria-hidden="true"></span>
+            <span class="win-title mono" data-i18n="demo.title"></span>
+            <span class="grow"></span>
+            <button class="mini" id="replay" type="button" data-i18n="demo.replay"></button>
+            <button class="mini" id="clear" type="button" data-i18n="demo.clear"></button>
+            <div class="seg" role="group" data-i18n-aria="theme.toggle">
+              <button type="button" data-set-theme="paper" data-i18n="theme.paper"></button>
+              <button type="button" data-set-theme="chalk" data-i18n="theme.chalk"></button>
+            </div>
+          </div>
+          <div class="board">
+            <svg id="board" viewBox="0 0 1000 600" role="img" data-i18n-aria="demo.aria" preserveAspectRatio="xMidYMid meet"><g id="layer" class="layer"></g></svg>
+            <p class="board-empty" id="empty" data-i18n="demo.empty" hidden></p>
+          </div>
+          <div class="captions" aria-live="polite">
+            <div class="cap-line"><span class="spk" id="capSpk"></span><span class="cap-text" id="capText"></span></div>
+            <div class="ops mono" id="ops"></div>
+          </div>
+          <form class="composer" id="composer" autocomplete="off">
+            <span class="mic" id="mic" aria-hidden="true"><span class="wave" id="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span>
+            <button class="spk-tag" id="spk" type="button" data-i18n-aria="demo.speaker">你</button>
+            <input id="say" type="text" maxlength="60" data-i18n-ph="demo.placeholder" enterkeyhint="send" />
+            <button class="send" type="submit" aria-label="Send">↵</button>
+          </form>
+          <div class="chips" id="chips"></div>
+        </div>
+        <p class="try mono" data-i18n="demo.try"></p>
+      </section>
+
+      <!-- ② 工作原理 -->
+      <section class="sec how" id="how">
+        <div class="wrap">
+          <p class="eyebrow mono" data-i18n="how.eyebrow"></p>
+          <h2 class="ink-write sec-title" data-ink="how.title" data-messy="0.14" data-weight="0.7"></h2>
+          <div class="how-grid">
+            <ol class="how-steps" id="steps">
+              <li data-step="0"><span class="n mono">01</span><h3 data-i18n="how.s1.t"></h3><p data-i18n="how.s1.p"></p></li>
+              <li data-step="1"><span class="n mono">02</span><h3 data-i18n="how.s2.t"></h3><p data-i18n="how.s2.p"></p></li>
+              <li data-step="2"><span class="n mono">03</span><h3 data-i18n="how.s3.t"></h3><p data-i18n="how.s3.p"></p></li>
+              <li data-step="3"><span class="n mono">04</span><h3 data-i18n="how.s4.t"></h3><p data-i18n="how.s4.p"></p></li>
+            </ol>
+            <div class="how-stage" id="stage" data-step="0">
+              <div class="panel" data-panel="0">
+                <div class="tag mono" data-i18n="how.p1.tag"></div>
+                <div class="wave big" id="wave2"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <p class="quote" data-i18n="how.p1.q"></p>
+              </div>
+              <div class="panel" data-panel="1">
+                <div class="tag mono" data-i18n="how.p2.tag"></div>
+                <pre class="code mono" id="code"></pre>
+                <p class="foot mono" data-i18n="how.p2.foot"></p>
+              </div>
+              <div class="panel" data-panel="2">
+                <div class="tag mono" data-i18n="how.p3.tag"></div>
+                <svg class="mini-layout" viewBox="0 0 360 150" aria-hidden="true">
+                  <g class="ml-old"><rect x="10" y="20" width="90" height="44" rx="10"/><rect x="135" y="20" width="90" height="44" rx="10"/><rect x="10" y="92" width="90" height="44" rx="10"/><path d="M100 42h35M55 64v28" /></g>
+                  <g class="ml-new"><rect x="260" y="20" width="90" height="44" rx="10"/><path d="M225 42h35"/></g>
+                </svg>
+                <p class="foot mono" data-i18n="how.p3.foot"></p>
+              </div>
+              <div class="panel" data-panel="3">
+                <div class="tag mono" data-i18n="how.p4.tag"></div>
+                <svg class="mini-ink" id="miniInk" viewBox="0 0 420 200" aria-hidden="true"><g id="miniLayer" class="layer"></g></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ③ 手写：潦草度 -->
+      <section class="sec hand" id="hand">
+        <div class="wrap">
+          <p class="eyebrow mono" data-i18n="hand.eyebrow"></p>
+          <h2 class="ink-write sec-title" data-ink="hand.title" data-messy="0.14" data-weight="0.7"></h2>
+          <p class="sec-lede" data-i18n="hand.p"></p>
+          <div class="play">
+            <div class="paper"><svg id="playSvg" viewBox="0 0 900 140" aria-hidden="true" preserveAspectRatio="xMinYMid meet"><g id="playLayer" class="layer"></g></svg></div>
+            <div class="play-ctl">
+              <label class="slider">
+                <span class="mono"><span data-i18n="hand.messy"></span> <b id="messyVal">18</b></span>
+                <input id="messy" type="range" min="0" max="100" value="18" />
+                <span class="ends mono"><span data-i18n="hand.neat"></span><span data-i18n="hand.wild"></span></span>
+              </label>
+              <input class="play-in" id="playIn" type="text" maxlength="28" data-i18n-ph="hand.ph" />
+              <div class="chips" id="playChips"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ④ 隐私（反色） -->
+      <section class="sec privacy inverse" id="privacy">
+        <div class="wrap">
+          <p class="eyebrow mono" data-i18n="priv.eyebrow"></p>
+          <h2 class="ink-write sec-title" data-ink="priv.title" data-messy="0.14" data-weight="0.7"></h2>
+          <p class="sec-lede" data-i18n="priv.p"></p>
+          <div class="diagram" id="diagram">
+            <div class="machine">
+              <span class="machine-label mono" data-i18n="priv.machine"></span>
+              <div class="pipe">
+                <span class="node" data-i18n="priv.mic"></span><i class="arr">→</i>
+                <span class="node" data-i18n="priv.asr"></span><i class="arr">→</i>
+                <span class="node" data-i18n="priv.llm"></span><i class="arr">→</i>
+                <span class="node" data-i18n="priv.board"></span>
+              </div>
+            </div>
+            <div class="outside">
+              <svg id="cloudSvg" viewBox="0 0 240 150" aria-hidden="true"><g id="cloudLayer" class="layer"></g></svg>
+              <span class="mono cloud-label" data-i18n="priv.cloud"></span>
+            </div>
+          </div>
+          <dl class="stats">
+            <div><dt>0 <small data-i18n="priv.s1.u"></small></dt><dd data-i18n="priv.s1.d"></dd></div>
+            <div><dt>≈0.4 s</dt><dd data-i18n="priv.s2.d"></dd></div>
+            <div><dt>2.7 GB</dt><dd data-i18n="priv.s3.d"></dd></div>
+            <div><dt>MIT</dt><dd data-i18n="priv.s4.d"></dd></div>
+          </dl>
+          <p class="fine mono" data-i18n="priv.fine"></p>
+        </div>
+      </section>
+
+      <!-- ⑤ 功能 -->
+      <section class="sec features" id="features">
+        <div class="wrap">
+          <p class="eyebrow mono" data-i18n="feat.eyebrow"></p>
+          <h2 class="ink-write sec-title" data-ink="feat.title" data-messy="0.14" data-weight="0.7"></h2>
+          <div class="bento">
+            <article class="card c-modes">
+              <div class="shot shot-1" id="modeShot">
+                <img data-look="paper" src="./img/screenshot-ink.png" alt="" loading="lazy" />
+                <img data-look="chalk" src="./img/screenshot-chalk.png" alt="" loading="lazy" />
+              </div>
+              <h3 data-i18n="feat.a.t"></h3><p data-i18n="feat.a.p"></p>
+            </article>
+            <article class="card c-board">
+              <div class="shot shot-2"><img src="./img/screenshot-groups.png" alt="" loading="lazy" /></div>
+              <h3 data-i18n="feat.b.t"></h3><p data-i18n="feat.b.p"></p>
+            </article>
+            <article class="card c-stable">
+              <div class="stable" aria-hidden="true"><i></i><i></i><i></i><i class="new"></i></div>
+              <h3 data-i18n="feat.c.t"></h3><p data-i18n="feat.c.p"></p>
+            </article>
+            <article class="card c-export">
+              <pre class="code mono" id="exportCode"></pre>
+              <h3 data-i18n="feat.d.t"></h3><p data-i18n="feat.d.p"></p>
+              <div class="chips static"><span>Markdown</span><span>PNG</span><span>.excalidraw</span></div>
+            </article>
+            <article class="card c-model">
+              <div class="shot shot-3"><img src="./img/screenshot-models.png" alt="" loading="lazy" /></div>
+              <h3 data-i18n="feat.e.t"></h3><p data-i18n="feat.e.p"></p>
+            </article>
+            <article class="card c-lang">
+              <div class="langs"><span>中文</span><span>English</span><span>日本語</span><span>한국어</span><span>粤语</span></div>
+              <h3 data-i18n="feat.f.t"></h3><p data-i18n="feat.f.p"></p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ⑥ 路线 -->
+      <section class="sec roadmap" id="roadmap">
+        <div class="wrap">
+          <p class="eyebrow mono" data-i18n="road.eyebrow"></p>
+          <h2 class="ink-write sec-title" data-ink="road.title" data-messy="0.14" data-weight="0.7"></h2>
+          <div class="road">
+            <div><h3 class="mono" data-i18n="road.now"></h3><ul id="roadNow"></ul></div>
+            <div><h3 class="mono" data-i18n="road.next"></h3><ul id="roadNext"></ul></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ⑦ 下载 -->
+      <section class="sec final" id="download">
+        <div class="wrap">
+          <h2 class="ink-write final-title" data-ink="final.title" data-messy="0.2" data-weight="0.62" data-align="center" data-underline="last"></h2>
+          <p class="sec-lede" data-i18n="final.p"></p>
+          <div class="dl">
+            <a class="btn btn-primary" href="https://github.com/HsiangNianian/boardcast/releases">Linux · x64</a>
+            <a class="btn btn-primary" href="https://github.com/HsiangNianian/boardcast/releases">Windows · x64</a>
+            <a class="btn btn-primary" href="https://github.com/HsiangNianian/boardcast/releases">Windows · ARM64</a>
+            <span class="btn btn-off" aria-disabled="true"><span>macOS</span> <small data-i18n="final.soon"></small></span>
+          </div>
+          <a class="gh mono" href="https://github.com/HsiangNianian/boardcast" data-i18n="final.gh"></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot-bar">
+      <div class="wrap">
+        <span class="mono">boardcast · MIT</span>
+        <span class="mono" data-i18n="foot.credit"></span>
+      </div>
+    </footer>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

@@ -23,7 +23,7 @@ const CDN = 'https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0.1'
 const hz = (p: number[]): Pt => [p[0] / 1024, (900 - p[1]) / 1024]
 
 async function loadHanzi(ch: string): Promise<Glyph | null> {
-  for (const base of ['/hanzi', CDN]) {
+  for (const base of [`${import.meta.env.BASE_URL}hanzi`, CDN]) {
     try {
       const r = await fetch(`${base}/${encodeURIComponent(ch)}.json`)
       if (!r.ok) continue

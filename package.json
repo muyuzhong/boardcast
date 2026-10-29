@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/engine/*.test.ts\"",
     "eval": "node eval/run.ts",
+    "site:dev": "node site/scripts/prepare.mjs && vite --config site/vite.config.ts",
+    "site:build": "node site/scripts/prepare.mjs && vite build --config site/vite.config.ts",
     "tauri": "tauri"
   },
   "dependencies": {
